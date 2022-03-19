@@ -115,7 +115,7 @@ func FindMAC(ip, srcip net.IP, handle *pcap.Handle, iface *net.Interface) ([]byt
 	Request(handle, srcip, iface.HardwareAddr, ip)
 	for i := 0; i < 10; i++ {
 		arp := <-out
-		if arp.DstProtAddress == ip {
+		if arp.DstProtAddress.String() == ip.String() {
 			return arp.DstHwAddress, nil
 		}
 		time.Sleep(1 * time.Second)
