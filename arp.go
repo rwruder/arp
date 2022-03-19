@@ -3,6 +3,7 @@ package arp
 import (
 	"fmt"
 	"net"
+	"time"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -84,18 +85,40 @@ func Reply(handle *pcap.Handle, srcip, srcmac, targetip, targetmac []byte) error
 	return nil
 }
 
-func Listen(handle *pcap.Handle, iface *net.Interface, out chan *layers.ARP) {
+func Listen(handle *pcap.Handle, iface *net.Interface, out chan *layers.ARP, stop chan struct{}) {
 	// Listens for arp packets on iface and will write the arp layer of those packets to the out channel
 	src := gopacket.NewPacketSource(handle, layers.LayerTypeEthernet)
 	in := src.Packets()
 	for {
-		packet := <-in
-		arpLayer := packet.Layer(layers.LayerTypeARP)
-		if arpLayer == nil {
-			continue
+		select {
+		case <-stop:
+			return
+		case packet := <-in:
+			arpLayer := packet.Layer(layers.LayerTypeARP)
+			if arpLayer == nil {
+				continue
+			}
+			arp := arpLayer.(*layers.ARP)
+			out <- arp
 		}
-		arp := arpLayer.(*layers.ARP)
-		out <- arp
 	}
 
+}
+
+func FindMAC(ip, srcip net.IP, handle *pcap.Handle, iface *net.Interface) ([]byte, error) {
+	stop := make(chan struct{})
+	out := make(chan *layers.ARP)
+	go Listen(handle, iface, out, stop)
+	defer close(stop)
+	defer close(out)
+
+	Request(handle, srcip, iface.HardwareAddr, ip)
+	for i := 0; i < 10; i++ {
+		arp := <-out
+		if arp.DstProtAddress == ip {
+			return arp.DstHwAddress, nil
+		}
+		time.Sleep(1 * time.Second)
+	}
+	return nil, fmt.Errorf("Could not find %s", ip.String())
 }
